@@ -1,0 +1,66 @@
+name: Sprint (30-second polling)
+
+# This is how you get 30-second precision out of cron, whose floor is 1 minute:
+# cron only decides when the job STARTS. Once running, the script itself polls
+# every 30 seconds and exits the moment it sees a change.
+#
+# Leave the schedule commented out until the Watch workflow has collected a few
+# days of history.jsonl. Then set the cron to start ~30 minutes before the hour
+# the data usually lands, and this will catch the flip within 30 seconds.
+#
+# Cron is UTC. There is no timezone option in GitHub Actions.
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: "How long to keep polling (seconds)"
+        default: "3000"
+      interval:
+        description: "Seconds between polls"
+        default: "30"
+
+  # schedule:
+  #   - cron: "45 6 * * *"   # <- uncomment and set once the window is known
+
+concurrency:
+  group: yt-charts-state
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  sprint:
+    runs-on: ubuntu-latest
+    # Hard ceiling so a stuck run can never burn the whole Actions budget.
+    timeout-minutes: 55
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Poll rapidly until data changes
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          SPRINT_DURATION_SECONDS: ${{ github.event.inputs.duration || '3000' }}
+          POLL_INTERVAL_SECONDS: ${{ github.event.inputs.interval || '30' }}
+        run: python3 monitor.py
+
+      - name: Commit updated state
+        if: always()
+        run: |
+          git config user.name  "yt-charts-monitor"
+          git config user.email "actions@github.com"
+          git add state.json history.jsonl 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "no change"
+          else
+            git commit -m "sprint: $(date -u '+%Y-%m-%d %H:%M UTC')"
+            for i in 1 2 3; do
+              git pull --rebase --autostash && git push && break || sleep 5
+            done
+          fi

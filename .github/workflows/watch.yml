@@ -1,0 +1,52 @@
+name: Watch (safety net)
+
+# Runs a single check on a slow cadence, all day long. This is the net that
+# guarantees an update is never missed entirely - worst case you learn about it
+# ~10 minutes late instead of within 30 seconds.
+#
+# Its second job is reconnaissance: every detection is timestamped into
+# history.jsonl, so after a few days you can read off the exact hours the data
+# actually lands and point the fast sprint workflow at that window.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # every 10 minutes
+  workflow_dispatch:          # also runnable by hand from the Actions tab
+
+# Never let two runs fight over committing state.json.
+concurrency:
+  group: yt-charts-state
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check for new data
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python3 monitor.py
+
+      - name: Commit updated state
+        run: |
+          git config user.name  "yt-charts-monitor"
+          git config user.email "actions@github.com"
+          git add state.json history.jsonl 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "no change"
+          else
+            git commit -m "state: $(date -u '+%Y-%m-%d %H:%M UTC')"
+            # Another run may have pushed while we were working; rebase and retry.
+            for i in 1 2 3; do
+              git pull --rebase --autostash && git push && break || sleep 5
+            done
+          fi

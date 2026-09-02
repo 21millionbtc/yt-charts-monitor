@@ -1,0 +1,10 @@
+# Never commit the webhook - anyone with that URL can post to your channel.
+.env
+
+__pycache__/
+*.pyc
+.DS_Store
+
+# NOTE: state.json and history.jsonl are intentionally NOT ignored.
+# They are how the monitor remembers what it has already seen between runs,
+# and history.jsonl is your permanent record of when each update landed.
