@@ -254,7 +254,11 @@ def check_once(webhook, verbose=True):
         latest = max(by_date)
         prev = state.get(aid, {})
         prev_latest = prev.get("latest_date")
-        prev_by_date = prev.get("views", {})
+        prev_by_date = dict(prev.get("views", {}))
+        pending = dict(prev.get("pending", {}))
+        # Highest date we have ever alerted on. Guards against re-alerting the
+        # same day if the trailing edge flaps backwards between regions.
+        max_alerted = prev.get("max_alerted_date") or prev_latest
 
         if verbose:
             print(f"  {name}: latest={latest} views={fmt(by_date[latest])}")
@@ -263,8 +267,11 @@ def check_once(webhook, verbose=True):
             # First run - record the baseline without alerting, otherwise the
             # very first poll would fire a bogus "new day" for old data.
             print(f"    -> baseline recorded (no alert)")
+            max_alerted = latest
 
-        elif latest > prev_latest:
+        elif latest > (max_alerted or ""):
+            # A genuinely new day. Alert immediately - this is the event the
+            # monitor exists for, and delaying it would defeat the 30s sprint.
             changed = True
             yesterday = prev_by_date.get(prev_latest)
             embeds.append(build_embed(name, "new_day", latest,
@@ -273,23 +280,51 @@ def check_once(webhook, verbose=True):
                             "date": latest, "views": by_date[latest],
                             "previous_date": prev_latest})
             print(f"    -> NEW DAY: {prev_latest} -> {latest}")
+            max_alerted = latest
 
-        else:
-            # Same latest date, but check whether any published value moved.
-            revised = [d for d, v in by_date.items()
-                       if d in prev_by_date and prev_by_date[d] != v]
-            if revised:
-                changed = True
-                d = max(revised)
-                embeds.append(build_embed(name, "revision", d, by_date[d],
-                                          prev_by_date[d], detected_at))
-                append_history({"ts": detected_at, "artist": name,
-                                "kind": "revision", "date": d,
-                                "views": by_date[d],
-                                "previous_views": prev_by_date[d]})
-                print(f"    -> REVISED: {', '.join(sorted(revised))}")
+        # Revisions to already-published days need CONFIRMATION before alerting.
+        #
+        # YouTube serves different figures for the same date depending on which
+        # region asks - observed up to ~1.7% apart, in both directions, on dates
+        # more than a week old. A single differing poll is therefore not evidence
+        # of a revision. We only alert once the SAME new value shows up twice in
+        # a row, which filters region flapping while still catching real changes.
+        newly_pending = {}
+        confirmed = []
+        for d, v in by_date.items():
+            if d not in prev_by_date or prev_by_date[d] == v:
+                continue
+            if pending.get(d) == v:
+                confirmed.append(d)
+            else:
+                newly_pending[d] = v
 
-        state[aid] = {"name": name, "latest_date": latest, "views": by_date,
+        if confirmed:
+            changed = True
+            d = max(confirmed)
+            embeds.append(build_embed(name, "revision", d, by_date[d],
+                                      prev_by_date[d], detected_at))
+            append_history({"ts": detected_at, "artist": name,
+                            "kind": "revision", "date": d,
+                            "views": by_date[d],
+                            "previous_views": prev_by_date[d]})
+            print(f"    -> REVISED (confirmed): {', '.join(sorted(confirmed))}")
+            for d in confirmed:
+                prev_by_date[d] = by_date[d]
+
+        if newly_pending:
+            print(f"    -> possible revision, awaiting confirmation: "
+                  f"{', '.join(sorted(newly_pending))}")
+
+        # Accept new dates and any confirmed values; leave unconfirmed ones at
+        # their old value so the next poll can compare against a stable baseline.
+        for d, v in by_date.items():
+            if d not in prev_by_date:
+                prev_by_date[d] = v
+
+        state[aid] = {"name": name, "latest_date": latest,
+                      "views": prev_by_date, "pending": newly_pending,
+                      "max_alerted_date": max_alerted,
                       "last_checked": detected_at}
 
     save_state(state)

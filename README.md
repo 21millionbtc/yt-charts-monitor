@@ -42,6 +42,36 @@ latest published day was 2026-08-30. So "a new day was added" does **not** mean
 Note also that the *artists chart* on the site is weekly-only. Daily numbers exist
 only on the per-artist insights page, which is what this monitors.
 
+## Important: the same date returns different numbers by region
+
+YouTube serves different figures for the *same date* depending on where the
+request comes from. Measured between a home connection and a GitHub Actions
+runner on 2026-09-02:
+
+| Date | GitHub runner | Home IP | Delta |
+|---|---|---|---|
+| 2026-08-20 | 16,749,431 | 16,823,787 | +74,356 |
+| 2026-08-27 | 18,514,459 | 18,213,170 | -301,289 |
+| 2026-08-28 | 20,190,433 | 20,052,686 | -137,747 |
+
+Up to ~1.7%, in both directions, on dates more than a week old — so this is not
+recent days still settling. It means **a single differing reading is not evidence
+of a revision.**
+
+Two consequences:
+
+1. Revision alerts require **confirmation**: the same new value must appear on two
+   consecutive polls before anything is sent. A one-off regional difference
+   resolves itself silently. `state.json` holds unconfirmed values under
+   `pending`.
+2. New-day alerts fire immediately (that event is unambiguous and worth knowing
+   about fast), but `max_alerted_date` ensures the same day is never announced
+   twice if the trailing edge flaps backwards.
+
+Do not run `monitor.py` locally and commit the resulting `state.json` — your home
+IP's numbers will differ from the runner's and the next scheduled run will report
+a spurious revision.
+
 ## Setup
 
 ### 1. Create the repository
