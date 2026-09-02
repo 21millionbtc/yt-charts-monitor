@@ -65,6 +65,15 @@ LOOKBACK_DAYS = 14
 DISCORD_GREEN = 0x1DB954   # new day of data
 DISCORD_ORANGE = 0xE67E22  # revision to an already-published day
 
+# Whether to send a Discord message when previously-published numbers change.
+#
+# Off by default. YouTube returns different figures for the same date depending
+# on the requesting region, and GitHub runners move between regions between runs,
+# so "revisions" are frequently just an artifact of which machine asked. They are
+# always written to history.jsonl regardless; this flag only controls whether
+# they interrupt you. Set ALERT_ON_REVISIONS=1 to turn the Discord alerts on.
+ALERT_ON_REVISIONS = os.environ.get("ALERT_ON_REVISIONS", "").strip() in ("1", "true", "yes")
+
 
 # --------------------------------------------------------------------------
 # API
@@ -300,15 +309,24 @@ def check_once(webhook, verbose=True):
                 newly_pending[d] = v
 
         if confirmed:
-            changed = True
             d = max(confirmed)
-            embeds.append(build_embed(name, "revision", d, by_date[d],
-                                      prev_by_date[d], detected_at))
+            # Always record revisions to history - they are useful data even
+            # when we choose not to interrupt anyone about them.
             append_history({"ts": detected_at, "artist": name,
                             "kind": "revision", "date": d,
                             "views": by_date[d],
-                            "previous_views": prev_by_date[d]})
-            print(f"    -> REVISED (confirmed): {', '.join(sorted(confirmed))}")
+                            "previous_views": prev_by_date[d],
+                            "alerted": ALERT_ON_REVISIONS})
+
+            if ALERT_ON_REVISIONS:
+                changed = True
+                embeds.append(build_embed(name, "revision", d, by_date[d],
+                                          prev_by_date[d], detected_at))
+                print(f"    -> REVISED (confirmed): {', '.join(sorted(confirmed))}")
+            else:
+                print(f"    -> revised (logged, no alert): "
+                      f"{', '.join(sorted(confirmed))}")
+
             for d in confirmed:
                 prev_by_date[d] = by_date[d]
 

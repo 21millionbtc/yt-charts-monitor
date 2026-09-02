@@ -58,15 +58,23 @@ Up to ~1.7%, in both directions, on dates more than a week old — so this is no
 recent days still settling. It means **a single differing reading is not evidence
 of a revision.**
 
-Two consequences:
+Three consequences:
 
-1. Revision alerts require **confirmation**: the same new value must appear on two
-   consecutive polls before anything is sent. A one-off regional difference
-   resolves itself silently. `state.json` holds unconfirmed values under
-   `pending`.
-2. New-day alerts fire immediately (that event is unambiguous and worth knowing
-   about fast), but `max_alerted_date` ensures the same day is never announced
-   twice if the trailing edge flaps backwards.
+1. **Revision alerts are off by default.** Runners move between regions from one
+   run to the next, so a "revision" is usually just a different machine asking.
+   Revisions are still written to `history.jsonl` every time — the flag only
+   controls whether they interrupt you. Turn them on by setting
+   `ALERT_ON_REVISIONS: "1"` in the workflow's `env:` block.
+2. Even when enabled, revisions require **confirmation**: the same new value must
+   appear on two consecutive polls. `state.json` holds unconfirmed values under
+   `pending`. This filters single flaps, though not a sustained run of polls from
+   the same non-baseline region.
+3. **New-day alerts fire immediately and are unaffected by any of this.** The
+   trailing edge advancing is unambiguous, and `max_alerted_date` ensures a given
+   day is never announced twice if it flaps backwards.
+
+New-day detection — the thing this exists for — is reliable. Revision detection
+through this API is not, which is why the two are treated differently.
 
 Do not run `monitor.py` locally and commit the resulting `state.json` — your home
 IP's numbers will differ from the runner's and the next scheduled run will report
