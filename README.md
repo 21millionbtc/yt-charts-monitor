@@ -118,6 +118,47 @@ precision. The sprint workflow gets around this: cron decides only when the job
 would mean ~2,880 API hits a day, which risks getting rate-limited. So the sprint
 is pointed at a narrow window and the cheap watcher covers the rest of the day.
 
+## Running 24/7 at 30-second intervals
+
+GitHub Actions gives you 30-second polling *inside a window*, not around the
+clock. Cron's floor is 5 minutes, and while you could chain 6-hour jobs to cover
+a full day, using Actions as an always-on server is against GitHub's Actions
+policy and risks the repo being disabled. Don't.
+
+For genuine 24/7, run the container. `SPRINT_DURATION_SECONDS=-1` means "poll
+forever, never exit":
+
+```bash
+docker build -t yt-charts-monitor .
+docker run -d --restart=always \
+  -e DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..." \
+  -v yt-charts-state:/app/data -e STATE_DIR=/app/data \
+  --name yt-charts yt-charts-monitor
+```
+
+The loop is failure-tolerant: a bad poll backs off exponentially (capped at 30
+min) and the process keeps going, so a network blip or a YouTube hiccup can't
+silently kill the monitor.
+
+### Where to host it
+
+| Option | Cost | Notes |
+|---|---|---|
+| **Oracle Cloud Always Free** | $0 forever | A genuinely free ARM VM. Card required for identity check only. Most setup friction. |
+| **Fly.io** (`fly.toml` included) | ~$2/mo | Smallest machine. Easiest deploy. No longer has a free tier. |
+| **A Raspberry Pi / spare box** | $0 | Best option if you have one sitting around. |
+
+There is no free, always-on, no-credit-card host — that combination essentially
+does not exist any more. Oracle is the closest.
+
+### Is 24/7 actually worth it?
+
+The data updates **once a day**. Polling every 30s around the clock is ~2,880
+requests/day to an undocumented endpoint to catch a single event, versus ~120 for
+a one-hour window at identical precision. The main risk is not cost, it is that
+YouTube rate-limits or blocks the endpoint, which means *no* alerts rather than
+slower ones. A window is strictly better once the update hour is known.
+
 ### Turning on the sprint
 
 After a few days, look at `history.jsonl` — each line is timestamped in UTC:

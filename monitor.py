@@ -55,8 +55,13 @@ CONTEXT = {
 }
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-STATE_PATH = os.path.join(HERE, "state.json")
-HISTORY_PATH = os.path.join(HERE, "history.jsonl")
+# STATE_DIR lets a container point state at a mounted volume so it survives
+# restarts. Defaults to alongside the script, which is what the GitHub workflows
+# expect (they commit state.json back to the repo).
+STATE_DIR = os.environ.get("STATE_DIR", "").strip() or HERE
+os.makedirs(STATE_DIR, exist_ok=True)
+STATE_PATH = os.path.join(STATE_DIR, "state.json")
+HISTORY_PATH = os.path.join(STATE_DIR, "history.jsonl")
 
 # How many days of history to request. The API lags roughly 2-3 days behind
 # today, so a short window would return nothing at all.
@@ -354,19 +359,65 @@ def check_once(webhook, verbose=True):
     return changed
 
 
+def run_forever(webhook, interval):
+    """Poll continuously, forever. For running as an always-on service.
+
+    Unlike sprint mode this never exits on a change - it keeps watching. It also
+    never dies on an error: a failed poll backs off and the loop continues, so a
+    transient network blip or a YouTube hiccup can't silently end the monitor.
+    """
+    print(f"[forever] polling every {interval}s - press Ctrl-C to stop")
+    poll = 0
+    consecutive_errors = 0
+
+    while True:
+        poll += 1
+        started = time.time()
+        try:
+            # Only print the per-artist detail occasionally; at 30s intervals
+            # that is 2,880 polls a day and the logs would be unreadable.
+            check_once(webhook, verbose=(poll % 60 == 1))
+            consecutive_errors = 0
+        except KeyboardInterrupt:
+            print("\n[forever] stopped")
+            return 0
+        except Exception as exc:
+            consecutive_errors += 1
+            print(f"[{datetime.now(timezone.utc):%H:%M:%S} UTC] "
+                  f"poll {poll} failed ({consecutive_errors} in a row): {exc}")
+
+        # If YouTube starts refusing us, back off progressively rather than
+        # hammering it - that is what turns a temporary block into a ban.
+        delay = interval
+        if consecutive_errors:
+            delay = min(interval * (2 ** min(consecutive_errors, 6)), 1800)
+            print(f"    backing off {delay}s")
+
+        elapsed = time.time() - started
+        time.sleep(max(1, delay - elapsed))
+
+
 def main():
     webhook = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
 
     # Sprint mode: poll every N seconds for a bounded duration, exit as soon as
     # a change is seen. This is how we get 30-second precision out of a cron
     # system whose floor is one minute.
+    #
+    # SPRINT_DURATION_SECONDS:
+    #    0  -> a single check, then exit (cron style)
+    #   >0  -> poll for that many seconds, exit early on change
+    #   -1  -> run forever, never exit (always-on server style)
     duration = int(os.environ.get("SPRINT_DURATION_SECONDS", "0"))
     interval = int(os.environ.get("POLL_INTERVAL_SECONDS", "30"))
 
-    if duration <= 0:
+    if duration == 0:
         print(f"[{datetime.now(timezone.utc):%Y-%m-%d %H:%M:%S} UTC] single check")
-        changed = check_once(webhook)
-        return 0 if not changed else 0
+        check_once(webhook)
+        return 0
+
+    if duration < 0:
+        return run_forever(webhook, interval)
 
     deadline = time.time() + duration
     poll = 0

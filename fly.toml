@@ -1,0 +1,38 @@
+# Fly.io deployment for 24/7 30-second polling.
+#
+#   fly launch --no-deploy --copy-config --name yt-charts-monitor
+#   fly secrets set DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+#   fly volumes create ytstate --size 1
+#   fly deploy
+#
+# This is a worker, not a web app - it serves no HTTP traffic, so there is no
+# [http_service] block and no public IP is needed.
+
+app = "yt-charts-monitor"
+primary_region = "iad"
+
+[build]
+
+[env]
+  SPRINT_DURATION_SECONDS = "-1"   # run forever
+  POLL_INTERVAL_SECONDS = "30"
+  STATE_DIR = "/app/data"          # the mounted volume, so state survives restarts
+
+# Persist state.json across restarts and redeploys. Without this the container
+# re-baselines on every restart - which is safe (it never fires a false alert),
+# but it would miss an update that landed exactly during the restart.
+[[mounts]]
+  source = "ytstate"
+  destination = "/app/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+  cpus = 1
+
+# Never let Fly stop the machine when idle - this workload has no inbound
+# traffic, so autostop would shut down the very thing we are running.
+[[vm.processes]]
+  auto_stop_machines = false
+  auto_start_machines = false
+  min_machines_running = 1
