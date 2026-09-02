@@ -118,8 +118,25 @@ means the ID is `/m/09889g`. Add it to `ARTISTS` in `monitor.py`.
 
 ## Cost
 
-$0. A public repo has unlimited Actions minutes; this shape also fits inside the
-2,000 min/month free allowance for a private repo.
+$0 either way, but the repo's visibility constrains the polling cadence.
+
+**Public repo — unlimited Actions minutes.** The 10-minute watch cadence is fine.
+Nothing sensitive lives in this repo (the webhook is a GitHub Secret, never a
+file), so public is the recommended setup.
+
+**Private repo — 2,000 minutes/month.** Runs are billed per minute, rounded up,
+and each run costs ~2 min after checkout and Python setup. That is a budget of
+roughly 33 runs/day, so a 10-minute cadence (144/day) would exhaust the
+allowance in about a week and silently stop.
+
+To run private, slow the watcher down in `.github/workflows/watch.yml`:
+
+```yaml
+- cron: "*/45 * * * *"   # every 45 min — ~32 runs/day, fits the free tier
+```
+
+The sprint workflow is cheap regardless: it runs once a day for under an hour and
+exits early on detection.
 
 ## If it breaks
 
