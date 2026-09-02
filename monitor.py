@@ -30,7 +30,22 @@ from datetime import datetime, timedelta, timezone
 ARTISTS = [
     {"name": "Michael Jackson", "id": "/m/09889g"},
     {"name": "Taylor Swift", "id": "/m/0dl567"},
+    {"name": "Drake", "id": "/m/05mt_q"},
 ]
+
+# Tripwire mode: poll only ONE artist to detect that new data has landed, then
+# fetch everyone and alert. All artists are published by the same pipeline on the
+# same schedule - verified 2026-09-02, when all three shared an edge of
+# 2026-08-30 - so one artist is a reliable signal for all of them.
+#
+# This divides the steady-state request rate by the number of artists, which is
+# what makes a fast interval sustainable without hammering an undocumented
+# endpoint. Set TRIPWIRE=0 to poll every artist on every cycle instead.
+#
+# Trade-off: revisions to the non-tripwire artists are only noticed on cycles
+# where the edge moved. Since revision alerts are off by default (see
+# ALERT_ON_REVISIONS) this costs nothing in practice.
+TRIPWIRE = os.environ.get("TRIPWIRE", "1").strip() not in ("0", "false", "no")
 
 ENDPOINT = "https://charts.youtube.com/youtubei/v1/browse?alt=json"
 BROWSE_ID = "FEmusic_analytics_insights_artist"
@@ -359,6 +374,45 @@ def check_once(webhook, verbose=True):
     return changed
 
 
+def poll(webhook, verbose=True):
+    """One polling cycle. Uses the tripwire unless it is disabled.
+
+    Returns True if something was reported.
+    """
+    if not TRIPWIRE:
+        return check_once(webhook, verbose)
+
+    state = load_state()
+    canary = ARTISTS[0]
+    prev = state.get(canary["id"], {})
+    baseline = prev.get("max_alerted_date") or prev.get("latest_date")
+
+    # No baseline yet - do a full pass so every artist gets recorded.
+    if baseline is None:
+        return check_once(webhook, verbose)
+
+    try:
+        rows = fetch_artist(canary["id"])
+    except RuntimeError as exc:
+        print(f"  ! tripwire ({canary['name']}): {exc}")
+        return False
+
+    if not rows:
+        print(f"  ! tripwire ({canary['name']}): no data returned")
+        return False
+
+    latest = max(r["date"] for r in rows)
+
+    if latest > baseline:
+        print(f"  tripwire TRIPPED: {baseline} -> {latest} "
+              f"(fetching all {len(ARTISTS)} artists)")
+        return check_once(webhook, verbose=True)
+
+    if verbose:
+        print(f"  tripwire ({canary['name']}): {latest}, no change")
+    return False
+
+
 def run_forever(webhook, interval):
     """Poll continuously, forever. For running as an always-on service.
 
@@ -367,16 +421,16 @@ def run_forever(webhook, interval):
     transient network blip or a YouTube hiccup can't silently end the monitor.
     """
     print(f"[forever] polling every {interval}s - press Ctrl-C to stop")
-    poll = 0
+    n = 0
     consecutive_errors = 0
 
     while True:
-        poll += 1
+        n += 1
         started = time.time()
         try:
-            # Only print the per-artist detail occasionally; at 30s intervals
-            # that is 2,880 polls a day and the logs would be unreadable.
-            check_once(webhook, verbose=(poll % 60 == 1))
+            # Only print detail occasionally; at a fast interval this runs
+            # thousands of times a day and the logs would be unreadable.
+            poll(webhook, verbose=(n % 30 == 1))
             consecutive_errors = 0
         except KeyboardInterrupt:
             print("\n[forever] stopped")
@@ -384,7 +438,7 @@ def run_forever(webhook, interval):
         except Exception as exc:
             consecutive_errors += 1
             print(f"[{datetime.now(timezone.utc):%H:%M:%S} UTC] "
-                  f"poll {poll} failed ({consecutive_errors} in a row): {exc}")
+                  f"poll {n} failed ({consecutive_errors} in a row): {exc}")
 
         # If YouTube starts refusing us, back off progressively rather than
         # hammering it - that is what turns a temporary block into a ban.
@@ -409,24 +463,24 @@ def main():
     #   >0  -> poll for that many seconds, exit early on change
     #   -1  -> run forever, never exit (always-on server style)
     duration = int(os.environ.get("SPRINT_DURATION_SECONDS", "0"))
-    interval = int(os.environ.get("POLL_INTERVAL_SECONDS", "30"))
+    interval = int(os.environ.get("POLL_INTERVAL_SECONDS", "120"))
 
     if duration == 0:
         print(f"[{datetime.now(timezone.utc):%Y-%m-%d %H:%M:%S} UTC] single check")
-        check_once(webhook)
+        poll(webhook)
         return 0
 
     if duration < 0:
         return run_forever(webhook, interval)
 
     deadline = time.time() + duration
-    poll = 0
+    n = 0
     print(f"[sprint] every {interval}s for up to {duration}s")
     while time.time() < deadline:
-        poll += 1
-        print(f"[{datetime.now(timezone.utc):%H:%M:%S} UTC] poll {poll}")
+        n += 1
+        print(f"[{datetime.now(timezone.utc):%H:%M:%S} UTC] poll {n}")
         try:
-            if check_once(webhook, verbose=(poll == 1)):
+            if poll(webhook, verbose=(n == 1)):
                 print("[sprint] change detected - exiting early")
                 return 0
         except Exception as exc:  # never let one bad poll kill the sprint
@@ -435,7 +489,7 @@ def main():
             time.sleep(interval)
         else:
             break
-    print(f"[sprint] finished after {poll} polls, no change")
+    print(f"[sprint] finished after {n} polls, no change")
     return 0
 
 

@@ -4,7 +4,32 @@ Watches the daily global view counts for specific artists on
 [charts.youtube.com](https://charts.youtube.com) and sends a Discord message when
 a new day of data appears or when already-published numbers get revised.
 
-Currently tracking **Michael Jackson** (`/m/09889g`) and **Taylor Swift** (`/m/0dl567`).
+Currently tracking **Michael Jackson** (`/m/09889g`), **Taylor Swift**
+(`/m/0dl567`) and **Drake** (`/m/05mt_q`).
+
+## Request budget and the tripwire
+
+There is no published rate limit for this endpoint, so the goal is to stay
+obviously modest rather than to find the ceiling.
+
+All artists are published by the same pipeline on the same schedule — verified
+2026-09-02, when all three shared a trailing edge of 2026-08-30. So there is no
+need to poll all of them. **Tripwire mode polls one artist** to detect that new
+data landed, and only then fetches everyone and alerts. That divides the
+steady-state request rate by the number of artists:
+
+| Interval | Naive (3 artists) | With tripwire |
+|---|---|---|
+| 5 min | 864/day | 288/day |
+| 2 min | 2,160/day | 720/day |
+| 60s | 4,320/day | 1,440/day |
+
+At the configured 2-minute interval that is **720 requests/day** — about the same
+volume as polling all three artists every 15 minutes.
+
+Tripwire is on by default; set `TRIPWIRE=0` to poll every artist every cycle. The
+only cost is that revisions to the non-tripwire artists are noticed just on
+cycles where the edge moved, which is irrelevant while revision alerts are off.
 
 ## How the data is obtained
 

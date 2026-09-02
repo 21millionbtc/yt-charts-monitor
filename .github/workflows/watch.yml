@@ -8,9 +8,15 @@ name: Watch (safety net)
 # history.jsonl, so after a few days you can read off the exact hours the data
 # actually lands and point the fast sprint workflow at that window.
 
+# NOTE ON 2-MINUTE POLLING: GitHub's scheduler has a hard 5-minute floor, and in
+# practice it runs late under load. A 2-minute cadence is therefore NOT possible
+# via cron - it requires the always-on container (see Dockerfile / fly.toml,
+# POLL_INTERVAL_SECONDS=120). This workflow runs at the fastest cadence GitHub
+# actually supports, and stays useful as a backstop even once the container runs.
+
 on:
   schedule:
-    - cron: "*/10 * * * *"   # every 10 minutes
+    - cron: "*/5 * * * *"    # every 5 minutes = GitHub's minimum
   workflow_dispatch:          # also runnable by hand from the Actions tab
 
 # Never let two runs fight over committing state.json.

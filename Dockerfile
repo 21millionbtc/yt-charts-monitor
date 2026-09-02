@@ -10,7 +10,7 @@ COPY monitor.py .
 
 # -1 means "run forever" (see main() in monitor.py).
 ENV SPRINT_DURATION_SECONDS=-1
-ENV POLL_INTERVAL_SECONDS=30
+ENV POLL_INTERVAL_SECONDS=120
 
 # DISCORD_WEBHOOK_URL is supplied at runtime as a secret - never baked in.
 CMD ["python3", "-u", "monitor.py"]

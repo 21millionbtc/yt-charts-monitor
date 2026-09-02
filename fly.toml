@@ -15,7 +15,7 @@ primary_region = "iad"
 
 [env]
   SPRINT_DURATION_SECONDS = "-1"   # run forever
-  POLL_INTERVAL_SECONDS = "30"
+  POLL_INTERVAL_SECONDS = "120"    # 2 minutes
   STATE_DIR = "/app/data"          # the mounted volume, so state survives restarts
 
 # Persist state.json across restarts and redeploys. Without this the container
