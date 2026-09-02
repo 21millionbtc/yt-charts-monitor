@@ -387,8 +387,15 @@ def poll(webhook, verbose=True):
     prev = state.get(canary["id"], {})
     baseline = prev.get("max_alerted_date") or prev.get("latest_date")
 
-    # No baseline yet - do a full pass so every artist gets recorded.
-    if baseline is None:
+    # Any artist with no recorded state must be baselined by a full pass.
+    # Without this, an artist added to ARTISTS after the tripwire is already
+    # running would never enter state - and when the edge finally moved, their
+    # first real update would be swallowed as a "baseline" with no alert.
+    missing = [a["name"] for a in ARTISTS if a["id"] not in state]
+    if baseline is None or missing:
+        if missing:
+            print(f"  new artist(s) not yet baselined: {', '.join(missing)}"
+                  f" - running a full pass")
         return check_once(webhook, verbose)
 
     try:
