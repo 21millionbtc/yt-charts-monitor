@@ -143,6 +143,52 @@ precision. The sprint workflow gets around this: cron decides only when the job
 would mean ~2,880 API hits a day, which risks getting rate-limited. So the sprint
 is pointed at a narrow window and the cheap watcher covers the rest of the day.
 
+## Cloudflare Worker (the recommended deployment)
+
+**GitHub Actions cannot be used for timely alerts.** Measured 2026-09-07 on this
+repo: a `*/5` schedule ran at a **191-minute median gap**, with a worst case of
+5.6 hours — 14 runs across 41 hours where there should have been ~500. GitHub
+documents scheduled workflows as best-effort and deprioritises high-frequency
+crons on free public repos. No configuration fixes this.
+
+The Worker in `worker/` runs the same logic on Cloudflare Cron Triggers, which do
+fire on time. Free plan, no credit card, 1-minute minimum interval (configured
+here at 2).
+
+### Deploy
+
+You need a Cloudflare account first (free, no card): https://dash.cloudflare.com/sign-up
+
+```bash
+cd worker
+npx wrangler login                          # opens a browser to authorise
+npx wrangler kv namespace create STATE      # paste the returned id into wrangler.toml
+npx wrangler secret put DISCORD_WEBHOOK_URL # paste the webhook when prompted
+npx wrangler deploy
+```
+
+Watch it live:
+
+```bash
+npx wrangler tail
+```
+
+The Worker also serves a **read-only status page** at its `*.workers.dev` URL —
+current dates per artist plus recent events. It has no side effects and never
+posts to Discord, so the URL being public cannot be used to spam your channel.
+
+### Free-tier limits that shaped the code
+
+| Limit | Free plan | Our usage at `*/2` |
+|---|---|---|
+| Worker invocations | 100,000/day | 720/day |
+| KV reads | 100,000/day | 720/day |
+| **KV writes** | **1,000/day** | a few/day |
+
+The write limit is the binding one. State is written **only when something
+changes** — never per-poll bookkeeping like a "last checked" timestamp, which by
+itself would nearly exhaust the daily write budget.
+
 ## Running 24/7 at 30-second intervals
 
 GitHub Actions gives you 30-second polling *inside a window*, not around the

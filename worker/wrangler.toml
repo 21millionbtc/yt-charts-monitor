@@ -1,0 +1,22 @@
+name = "yt-charts-monitor"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# Every 2 minutes. Unlike GitHub Actions, Cloudflare actually honours this.
+# Change to "* * * * *" for 1-minute polling (the platform minimum), or
+# "*/5 * * * *" to be gentler on YouTube.
+[triggers]
+crons = ["*/2 * * * *"]
+
+[vars]
+TRIPWIRE = "1"             # poll one artist to detect changes, then fetch all
+ALERT_ON_REVISIONS = "0"   # revisions are logged but do not ping Discord
+
+# Created by:  npx wrangler kv namespace create STATE
+# Paste the returned id below - it is an identifier, not a secret.
+[[kv_namespaces]]
+binding = "STATE"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# DISCORD_WEBHOOK_URL is set as an encrypted secret, never in this file:
+#   npx wrangler secret put DISCORD_WEBHOOK_URL
