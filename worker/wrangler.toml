@@ -8,11 +8,16 @@ compatibility_date = "2026-09-01"
 # if you set this to true after registering a workers.dev subdomain.
 workers_dev = false
 
-# Every 2 minutes. Unlike GitHub Actions, Cloudflare actually honours this.
-# Change to "* * * * *" for 1-minute polling (the platform minimum), or
-# "*/5 * * * *" to be gentler on YouTube.
+# Every minute - Cloudflare's floor for cron triggers, and (unlike GitHub
+# Actions) actually honoured. With the tripwire this is ~1,440 requests/day to
+# YouTube, which is a rate that should not attract attention.
+#
+# Going faster means sub-minute scheduling (staggered polls inside one
+# invocation, or Durable Object alarms) AND doubling the request rate, to shave
+# seconds off detecting an event that happens once every 24 hours. Not worth the
+# risk of getting the endpoint blocked, which would mean no alerts at all.
 [triggers]
-crons = ["*/2 * * * *"]
+crons = ["* * * * *"]
 
 [vars]
 TRIPWIRE = "1"             # poll one artist to detect changes, then fetch all
