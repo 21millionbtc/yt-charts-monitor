@@ -167,6 +167,14 @@ npx wrangler secret put DISCORD_WEBHOOK_URL # paste the webhook when prompted
 npx wrangler deploy
 ```
 
+**Gotcha: you must load the Workers dashboard page once before the first deploy.**
+Cloudflare refuses to attach *any* cron schedule to an account that has no
+`workers.dev` subdomain — even for a Worker like this one that has no public URL
+and sets `workers_dev = false`. It fails with error 10063. Simply visiting
+`https://dash.cloudflare.com/<account-id>/workers-and-pages` creates the
+subdomain automatically; then `wrangler deploy` succeeds. Wrangler 4 has no CLI
+command for this, so the dashboard visit is unavoidable.
+
 Watch it live:
 
 ```bash
