@@ -2,11 +2,11 @@
  * YouTube Charts artist-view monitor - Cloudflare Worker.
  *
  * A port of monitor.py. Exists because GitHub Actions' scheduler does not honour
- * high-frequency crons: a */5 schedule was measured running at a ~191 minute
- * median. Cloudflare Cron Triggers actually run when they say they will.
+ * high-frequency crons: a five-minute schedule was measured running at a ~191
+ * minute median. Cloudflare Cron Triggers actually run when they say they will.
  *
  * Free tier notes that shaped this code:
- *   - Workers: 100k invocations/day. At */2 that is 720. Fine.
+ *   - Workers: 100k invocations/day. At two-minute polling that is 720. Fine.
  *   - KV: 100k reads/day but only 1k WRITES/day. So state is read every poll and
  *     written ONLY when something actually changed. Never write per-poll fields
  *     like "last checked" - that alone would nearly exhaust the write budget.
