@@ -64,3 +64,9 @@
 {"alerted": false, "artist": "Taylor Swift", "date": "2026-09-08", "kind": "revision", "previous_views": "14687358", "ts": "2026-09-16 10:42:10", "views": "14613455"}
 {"artist": "Drake", "date": "2026-09-14", "kind": "new_day", "previous_date": "2026-09-13", "ts": "2026-09-16 10:42:10", "views": "11587433"}
 {"alerted": false, "artist": "Drake", "date": "2026-09-08", "kind": "revision", "previous_views": "11774476", "ts": "2026-09-16 10:42:10", "views": "11713336"}
+{"artist": "Michael Jackson", "date": "2026-09-15", "kind": "new_day", "previous_date": "2026-09-14", "ts": "2026-09-18 09:36:42", "views": "16335148"}
+{"alerted": false, "artist": "Michael Jackson", "date": "2026-09-09", "kind": "revision", "previous_views": "17195865", "ts": "2026-09-18 09:36:42", "views": "17237043"}
+{"artist": "Taylor Swift", "date": "2026-09-15", "kind": "new_day", "previous_date": "2026-09-14", "ts": "2026-09-18 09:36:42", "views": "14542021"}
+{"alerted": false, "artist": "Taylor Swift", "date": "2026-09-09", "kind": "revision", "previous_views": "14856336", "ts": "2026-09-18 09:36:42", "views": "14885498"}
+{"artist": "Drake", "date": "2026-09-15", "kind": "new_day", "previous_date": "2026-09-14", "ts": "2026-09-18 09:36:42", "views": "12815143"}
+{"alerted": false, "artist": "Drake", "date": "2026-09-09", "kind": "revision", "previous_views": "11874461", "ts": "2026-09-18 09:36:42", "views": "11859048"}
