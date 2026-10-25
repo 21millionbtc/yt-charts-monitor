@@ -58,11 +58,75 @@ US weekly Top-Artists chart instead of what you asked for. It looks like success
 
 No API key, no login, and no browser are required.
 
-## Important: the data lags 2–3 days
+### The wider endpoint surface
 
-The newest available day is roughly 2–3 days behind today. As of 2026-09-02 the
-latest published day was 2026-08-30. So "a new day was added" does **not** mean
-"yesterday's numbers are in" — it means the trailing edge advanced by one day.
+The same endpoint serves the whole of charts.youtube.com, not just artist
+insights. The authoritative description of how the query string is built is the
+site's own bundle — `charts_polymer_v2.js`, in the function that switches on
+`browseId` (search it for `FEmusic_analytics_charts_home`).
+
+**The parameter that makes or breaks every request is `perspective`.** Without
+it the API ignores everything else and returns the default US weekly chart with
+HTTP 200 — the same silent failure described above. Note also that chart *detail*
+requests still send `browseId: FEmusic_analytics_charts_home`; `perspective` is
+what distinguishes them.
+
+| browseId | `perspective` | Returns |
+|---|---|---|
+| `..._charts_home` | `CHART_HOME` | top 100 artists + tracks + videos, plus `featuredSections` |
+| `..._charts_home` | `CHART_DETAILS` | one chart, 100 rows (see chart types below) |
+| `..._charts_home` | `PODCAST_SHOW` | podcast shows by watch time |
+| `..._insights_artist` | `ARTIST` | daily view series — what `monitor.py` uses |
+| `..._insights_location` | `LOCATION` | per-country daily view series |
+
+Chart params: `chart_params_country_code` (`us`, `gb`, `jp`, …, or `global`),
+`chart_params_chart_type`, `chart_params_period_type` (`DAILY` / `WEEKLY`),
+`chart_params_end_date`, `chart_params_chart_attribute`.
+
+The chart types the bundle can emit are `ARTISTS`, `TRACKS`, `VIDEOS`,
+`TRENDING_VIDEOS`, `TRENDING_MOVIES`, `SHORTS_TRACKS_BY_VIEWS`,
+`SHORTS_TRACKS_BY_USAGE`, `PODCAST_SHOWS_BY_WATCH_TIME` and `VIDEOS_LOP`.
+
+Being in that list does **not** mean a given chart exists for a given country and
+period — availability varies by both. Observed for `us`: `TRACKS` is weekly-only,
+and of the two Shorts charts only `SHORTS_TRACKS_BY_USAGE` is published, so
+`SHORTS_TRACKS_BY_VIEWS` returns HTTP 400 there. Rather than guess, read
+`perspectiveMetadata.availableChartsInfo` in any response — it lists the valid
+`chartType` × `chartPeriodType` combinations along with each one's
+`earliestEndDate` and `latestEndDate`. An invalid combination returns HTTP 400.
+
+Rows carry more than view counts: `currentPosition`, `previousPosition`,
+`percentViewsChange`, `periodsOnChart`, thumbnails, `encryptedVideoId`, artist
+MIDs, release dates and channel names.
+
+**A browser cannot call this endpoint directly** — there is no CORS header, and
+the request depends on `Origin`/`Referer` headers that browser JavaScript is
+forbidden from setting. Anything with a frontend needs a server-side proxy, which
+is why `viewer.py` exists rather than a plain HTML file.
+
+## Important: the data lags 1–2 days
+
+The newest available day trails today by one to two days, and **which one depends
+on the hour you ask**. Measured:
+
+| Checked (UTC) | Newest published day | Lag |
+|---|---|---|
+| 2026-09-02 | 2026-08-30 | 3 days |
+| 2026-09-07 15:52 | 2026-09-05 | 2 days |
+| 2026-10-25 23:14 | 2026-10-24 | 1 day |
+
+The pattern is consistent with day *D* being published at some point during day
+*D+1*: ask early in the UTC day and you see a 2-day lag, ask late and the newest
+day has usually landed. (This section previously claimed a flat 2–3 days, based
+only on the 2026-09-02 reading. The later measurements show that overstated it.)
+
+Two independent perspectives agree on the trailing edge, which is a useful
+cross-check if you ever suspect a date bug: `perspective=CHART_HOME` reports
+`availableChartsInfo[].latestEndDate` for the daily charts, and that matches the
+newest date returned by `perspective=ARTIST` for an individual artist.
+
+So "a new day was added" does **not** mean "yesterday's numbers are in" — it
+means the trailing edge advanced by one day.
 
 Note also that the *artists chart* on the site is weekly-only. Daily numbers exist
 only on the per-artist insights page, which is what this monitors.
@@ -266,6 +330,58 @@ alert, so it can't fire a false "new day" for data that was already there.
 Find the artist's ID on their charts URL — `charts.youtube.com/artist/%2Fm%2F09889g`
 means the ID is `/m/09889g`. Add it to `ARTISTS` in `monitor.py`.
 
+## Local viewer
+
+`viewer.py` serves the last 14 days of daily views for every configured artist as
+a chart you can read in a browser:
+
+```bash
+python3 viewer.py           # then open http://localhost:8765
+```
+
+It binds to `127.0.0.1` only. `?theme=light` / `?theme=dark` forces a theme; the
+in-page toggle remembers your choice.
+
+**It never writes `state.json` or `history.jsonl`.** That is deliberate: the
+README warns above that running the monitor locally and committing its state
+makes the next scheduled run report a spurious revision, because your home IP
+returns different numbers than the runner. The viewer reads the same API through
+`monitor.py`'s `fetch_artist`, but keeps its own cache in `.views_cache.json`
+(gitignored), so looking at the data locally can never corrupt the monitor.
+
+### The throttle, and how the viewer survives it
+
+The endpoint rate-limits with **HTTP 429**, and the important detail is that the
+throttle is **probabilistic, not a block**. Observed over ~20 attempts from one
+IP: failures spread evenly across all three artists, with a *different* artist
+succeeding on each pass — roughly one request in three got through. Nothing is
+banned; requests are simply being thinned.
+
+That shape dictates the design: **the cache is keyed per artist, not per pass.**
+
+1. **Bank every success.** An artist that returns is cached for 30 minutes and
+   is not requested again. Repeated loads therefore *converge* on a complete set
+   instead of re-rolling the dice on all three every time.
+2. **Only ask for what expired.** A plain page load requests just the artists
+   whose cache has lapsed — usually none, often one. "Refresh" uses a 60-second
+   floor rather than 0, because under a probabilistic throttle, re-fetching an
+   artist you just got spends one of the few requests that succeed on data you
+   already have.
+3. **Fall back for the rest.** An artist never successfully fetched falls back to
+   `state.json`, and one whose data predates the 14-day window is drawn as *no
+   recent data* rather than silently dropped. The page always names its sources.
+
+Requests are spaced ~4s apart and retry once, rather than using `monitor.py`'s
+3-attempt exponential backoff — when the endpoint is already throttling, retrying
+harder is what keeps it throttling.
+
+**If you are being throttled, the fix is to need fewer requests, not to dodge the
+limit.** Rotating IPs or visitor tokens to evade it risks turning a soft, self-
+clearing throttle into a hard block, which would take the monitor down with it.
+The tripwire (above) and this per-artist cache both exist for that reason. Note
+also that the limit is tied to the source IP: the Cloudflare Worker and GitHub
+runners have their own, so local probing does not affect the deployed monitor.
+
 ## Files
 
 | File | Purpose |
@@ -273,6 +389,10 @@ means the ID is `/m/09889g`. Add it to `ARTISTS` in `monitor.py`.
 | `monitor.py` | The poller, change detection, and Discord notifier |
 | `state.json` | Last-seen values (committed — this is the memory between runs) |
 | `history.jsonl` | Append-only log of every detected change, with UTC timestamps |
+| `viewer.py` | Localhost server for the 14-day view — read-only, never writes state |
+| `viewer.html` | The viewer's page (chart, stat tiles, table view) |
+| `.views_cache.json` | The viewer's own cache (gitignored, transient) |
+| `worker/` | The Cloudflare Worker port of the monitor |
 
 ## Cost
 

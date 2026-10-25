@@ -8,3 +8,9 @@ __pycache__/
 # NOTE: state.json and history.jsonl are intentionally NOT ignored.
 # They are how the monitor remembers what it has already seen between runs,
 # and history.jsonl is your permanent record of when each update landed.
+
+# Local viewer cache - transient, and its numbers are region-dependent.
+.views_cache.json
+
+# Dump of the Worker KV state, pulled with wrangler for local viewing.
+kv-state.json

@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Artist Daily Views</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #f6f6f4;
+    --surface-1: #fcfcfb;
+    --border:    #e1e0d9;
+    --grid:      #e1e0d9;
+    --baseline:  #c3c2b7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --muted:     #898781;
+    --accent:    #2a78d6;
+    --up:   #1baf7a;
+    --down: #e34948;
+    --warn: #eda100;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-0: #121211; --surface-1: #1a1a19;
+      --border: #2c2c2a; --grid: #2c2c2a; --baseline: #383835;
+      --text-primary: #ffffff; --text-secondary: #c3c2b7; --muted: #898781;
+      --accent: #3987e5; --up: #199e70; --down: #e66767; --warn: #c98500;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0: #121211; --surface-1: #1a1a19;
+    --border: #2c2c2a; --grid: #2c2c2a; --baseline: #383835;
+    --text-primary: #ffffff; --text-secondary: #c3c2b7; --muted: #898781;
+    --accent: #3987e5; --up: #199e70; --down: #e66767; --warn: #c98500;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--surface-0); color: var(--text-primary);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto;
+          padding-block: 26px 56px; padding-left: 20px; padding-right: 20px; }
+
+  header { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: baseline; }
+  h1 { font-size: 21px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .sub { color: var(--text-secondary); font-size: 13px; margin: 2px 0 18px; }
+  .controls { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; }
+  button {
+    font: inherit; font-size: 13px; color: var(--text-secondary);
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 7px; padding: 6px 11px; cursor: pointer;
+  }
+  button:hover { color: var(--text-primary); }
+  button[aria-pressed="true"] { color: var(--text-primary); border-color: var(--baseline); }
+
+  .banner {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+    font-size: 12.5px; color: var(--text-secondary); background: var(--surface-1);
+    border: 1px solid var(--border); border-radius: 9px;
+    padding: 10px 13px; margin-bottom: 8px; overflow-wrap: anywhere;
+  }
+  .banner.warn { border-color: var(--warn); }
+  .bar { flex: 1 1 140px; height: 4px; min-width: 120px;
+         background: var(--border); border-radius: 3px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 3px;
+             transition: width .4s ease; }
+  .errline { font-size: 11.5px; color: var(--muted); margin: 0 0 18px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+          gap: 12px; }
+  .panel { background: var(--surface-1); border: 1px solid var(--border);
+           border-radius: 11px; padding: 13px 14px 8px; min-width: 0; }
+  .p-name { font-size: 12.5px; font-weight: 500; color: var(--text-secondary);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .p-val { font-size: 21px; font-weight: 600; letter-spacing: -0.02em;
+           font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .p-sub { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums;
+           margin-top: 1px; }
+  .up { color: var(--up); } .down { color: var(--down); }
+  .p-chart { position: relative; margin-top: 8px; }
+  .panel.is-stale { opacity: .72; }
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+  .tip {
+    position: fixed; pointer-events: none; opacity: 0; transition: opacity .08s;
+    background: var(--surface-1); border: 1px solid var(--baseline);
+    border-radius: 8px; padding: 7px 10px; z-index: 20;
+    box-shadow: 0 5px 18px rgba(0,0,0,.16); white-space: nowrap;
+  }
+  .tip-d { font-size: 11px; color: var(--muted); text-transform: uppercase;
+           letter-spacing: .02em; }
+  .tip-v { font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  .card { background: var(--surface-1); border: 1px solid var(--border);
+          border-radius: 12px; padding: 16px 16px 8px; }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px;
+          font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--border);
+           white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; position: sticky; left: 0;
+           background: var(--surface-1); }
+  thead th { font-size: 11px; color: var(--muted); font-weight: 500;
+             text-transform: uppercase; letter-spacing: .03em; }
+  tbody tr:last-child td { border-bottom: none; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Artist daily views</h1>
+    <div class="controls">
+      <button id="scale-toggle" aria-pressed="true">Shared scale</button>
+      <button id="view-toggle" aria-pressed="false">Table</button>
+      <button id="theme-toggle">Theme</button>
+    </div>
+  </header>
+  <p class="sub" id="subtitle">Loading…</p>
+
+  <div class="banner" id="banner" hidden></div>
+  <p class="errline" id="errline" hidden></p>
+
+  <div id="grid" class="grid"></div>
+
+  <div class="card" id="table-card" hidden>
+    <div class="table-wrap"><table id="table"></table></div>
+  </div>
+</div>
+
+<div class="tip" id="tip"></div>
+
+<script>
+const NS = 'http://www.w3.org/2000/svg';
+let DATA = null, shared = true, timer = null;
+
+const nf = new Intl.NumberFormat('en-US');
+const compact = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M'
+                   : n >= 1e3 ? Math.round(n / 1e3) + 'K' : String(n);
+const shortDate = iso => {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d))
+    .toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+};
+const el = (tag, cls, txt) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (txt != null) n.textContent = txt;   // textContent: API strings are untrusted
+  return n;
+};
+const svgEl = (tag, attrs = {}) => {
+  const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  return n;
+};
+
+async function load() {
+  try {
+    const r = await fetch('/api/views');
+    DATA = await r.json();
+    render();
+    // Keep polling while the background filler still has artists to collect.
+    clearTimeout(timer);
+    if (DATA.pending && DATA.pending.length) timer = setTimeout(load, 8000);
+  } catch {
+    document.getElementById('subtitle').textContent = 'Could not reach the local server.';
+  }
+}
+
+function render() {
+  const { dates, summary, series, source, fetched_at, pending, errors, filling,
+          spacing, degraded, roster, newest } = DATA;
+  // roster is the configured artist count. Do NOT derive it from summary+pending:
+  // an artist served from state.json appears in BOTH, which would double-count.
+  const total = roster || summary.length;
+
+  document.getElementById('subtitle').textContent = newest
+    ? `14 days per artist · newest data ${shortDate(newest)} · global daily views`
+    : 'Waiting for the first artist to arrive…';
+
+  // --- status banner with fill progress ---------------------------------
+  const banner = document.getElementById('banner');
+  banner.textContent = '';
+  banner.className = 'banner' + (degraded ? ' warn' : '');
+  banner.hidden = false;
+  banner.append(el('span', null, source + (fetched_at ? ` · ${fetched_at} UTC` : '')));
+  if (pending && pending.length) {
+    const done = total - pending.length;
+    const bar = el('div', 'bar');
+    const fill = document.createElement('i');
+    fill.style.width = `${total ? (done / total) * 100 : 0}%`;
+    bar.append(fill);
+    banner.append(bar);
+    banner.append(el('span', null,
+      filling ? `fetching, ${spacing}s apart` : 'waiting'));
+  }
+
+  const errline = document.getElementById('errline');
+  if (errors && errors.length) {
+    errline.textContent = errors.join('  ·  ');
+    errline.hidden = false;
+  } else { errline.hidden = true; }
+
+  // Most-viewed first; artists whose data lags behind the newest sink below.
+  const order = summary.slice().sort((a, b) =>
+    (a.behind - b.behind) || ((b.latest || 0) - (a.latest || 0)));
+
+  // Shared scale across every panel, so panel heights are comparable.
+  const all = series.flatMap(s => s.values);
+  const globalMax = all.length ? Math.max(...all) : 1;
+
+  const grid = document.getElementById('grid');
+  grid.textContent = '';
+  const byName = Object.fromEntries(series.map(s => [s.name, s]));
+
+  order.forEach(s => {
+    const p = el('div', 'panel' + (s.behind ? ' is-stale' : ''));
+    p.append(el('div', 'p-name', s.name));
+    p.append(el('div', 'p-val', nf.format(s.latest)));
+    const sub = el('div', 'p-sub');
+    if (s.prev != null) {
+      const d = s.latest - s.prev, pct = s.prev ? (d / s.prev * 100) : 0;
+      sub.append(el('span', d >= 0 ? 'up' : 'down',
+        `${d >= 0 ? '+' : '−'}${Math.abs(pct).toFixed(1)}%`));
+      sub.append(document.createTextNode(` · avg ${compact(s.avg)}`));
+    } else {
+      sub.textContent = `avg ${compact(s.avg)}`;
+    }
+    p.append(sub);
+    // Only say "through <date>" when this panel lags the freshest artist, so
+    // the mixed-freshness case during a fill is never silently misleading.
+    if (s.behind) p.append(el('div', 'p-sub', `through ${shortDate(s.end_date)}`));
+    const box = el('div', 'p-chart');
+    p.append(box);
+    grid.append(p);
+    drawPanel(box, byName[s.name], shared ? globalMax : null);
+  });
+
+  // Placeholders for artists not yet fetched, so the grid shows the full
+  // roster and you can watch it fill in.
+  (pending || []).forEach(name => {
+    if (byName[name]) return;
+    const p = el('div', 'panel is-stale');
+    p.append(el('div', 'p-name', name));
+    p.append(el('div', 'p-val', '…'));
+    p.append(el('div', 'p-sub', 'fetching'));
+    grid.append(p);
+  });
+
+  drawTable();
+}
+
+function drawPanel(box, s, fixedMax) {
+  if (!s || !s.values.length) return;
+  const W = 260, H = 84, M = { t: 8, r: 4, b: 4, l: 4 };
+  const iw = W - M.l - M.r, ih = H - M.t - M.b;
+  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none' });
+  svg.style.height = H + 'px';
+  box.append(svg);
+
+  const vals = s.values, dts = s.dates;
+  const hi = fixedMax != null ? fixedMax : Math.max(...vals);
+  // Baseline at zero when scales are shared, so panel-to-panel height is a
+  // true magnitude comparison; fitted panels zoom to the series' own range.
+  const lo = fixedMax != null ? 0 : Math.min(...vals) * 0.985;
+  const span = (hi - lo) || 1;
+
+  const x = i => M.l + (vals.length === 1 ? iw / 2 : (i / (vals.length - 1)) * iw);
+  const y = v => M.t + ih - ((v - lo) / span) * ih;
+
+  svg.append(svgEl('line', { x1: M.l, x2: M.l + iw, y1: M.t + ih, y2: M.t + ih,
+    stroke: 'var(--grid)', 'stroke-width': 1 }));
+  svg.append(svgEl('path', {
+    d: vals.map((v, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join(' '),
+    fill: 'none', stroke: 'var(--accent)', 'stroke-width': 2,
+    'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+    'vector-effect': 'non-scaling-stroke',
+  }));
+
+  const dot = svgEl('circle', { r: 3.5, fill: 'var(--accent)',
+    stroke: 'var(--surface-1)', 'stroke-width': 2, opacity: 0 });
+  svg.append(dot);
+  const hit = svgEl('rect', { x: 0, y: 0, width: W, height: H,
+    fill: 'transparent', style: 'cursor:crosshair' });
+  svg.append(hit);
+
+  const tip = document.getElementById('tip');
+  hit.addEventListener('pointermove', e => {
+    const r = svg.getBoundingClientRect();
+    const i = Math.max(0, Math.min(vals.length - 1,
+      Math.round(((e.clientX - r.left) / r.width) * (vals.length - 1))));
+    dot.setAttribute('cx', x(i)); dot.setAttribute('cy', y(vals[i]));
+    dot.setAttribute('opacity', 1);
+    tip.textContent = '';
+    tip.append(el('div', 'tip-d', `${s.name} · ${shortDate(dts[i])}`));
+    tip.append(el('div', 'tip-v', nf.format(vals[i])));
+    tip.style.opacity = 1;
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    tip.style.left = Math.min(window.innerWidth - tw - 8,
+                              Math.max(8, e.clientX - tw / 2)) + 'px';
+    tip.style.top = Math.max(8, r.top - th - 8) + 'px';
+  });
+  hit.addEventListener('pointerleave', () => {
+    tip.style.opacity = 0; dot.setAttribute('opacity', 0);
+  });
+}
+
+function drawTable() {
+  const { dates, series } = DATA;
+  const t = document.getElementById('table');
+  t.textContent = '';
+  const thead = el('thead'), hr = el('tr');
+  hr.append(el('th', null, 'Artist'));
+  dates.forEach(d => hr.append(el('th', null, shortDate(d))));
+  thead.append(hr); t.append(thead);
+  const tb = el('tbody');
+  series.forEach(s => {
+    const tr = el('tr');
+    tr.append(el('td', null, s.name));
+    (s.table_values || []).forEach(v =>
+      tr.append(el('td', null, v == null ? '—' : nf.format(v))));
+    tb.append(tr);
+  });
+  t.append(tb);
+}
+
+document.getElementById('scale-toggle').addEventListener('click', e => {
+  shared = !shared;
+  e.currentTarget.setAttribute('aria-pressed', String(shared));
+  e.currentTarget.textContent = shared ? 'Shared scale' : 'Fit each';
+  if (DATA) render();
+});
+document.getElementById('view-toggle').addEventListener('click', e => {
+  const showTable = e.currentTarget.getAttribute('aria-pressed') === 'false';
+  e.currentTarget.setAttribute('aria-pressed', String(showTable));
+  e.currentTarget.textContent = showTable ? 'Charts' : 'Table';
+  document.getElementById('table-card').hidden = !showTable;
+  document.getElementById('grid').hidden = showTable;
+});
+
+// Theme: ?theme=light|dark wins, then a remembered choice, else the OS setting.
+const store = {
+  get() { try { return localStorage.getItem('theme'); } catch { return null; } },
+  set(v) { try { localStorage.setItem('theme', v); } catch { /* non-fatal */ } },
+};
+const qTheme = new URLSearchParams(location.search).get('theme');
+const initial = (qTheme === 'light' || qTheme === 'dark') ? qTheme : store.get();
+if (initial) document.documentElement.setAttribute('data-theme', initial);
+document.getElementById('theme-toggle').addEventListener('click', () => {
+  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  const cur = document.documentElement.getAttribute('data-theme') || (dark ? 'dark' : 'light');
+  const next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  store.set(next);
+});
+load();
+</script>
+</body>
+</html>

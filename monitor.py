@@ -27,10 +27,27 @@ from datetime import datetime, timedelta, timezone
 # Configuration
 # --------------------------------------------------------------------------
 
+# Michael Jackson stays first: he is the tripwire canary, and keeping him
+# there preserves the existing state baseline.
+# IDs are Google Knowledge Graph MIDs, read off the top-artists chart
+# (perspective=CHART_DETAILS, chart_type=ARTISTS), which returns name+id.
 ARTISTS = [
     {"name": "Michael Jackson", "id": "/m/09889g"},
-    {"name": "Taylor Swift", "id": "/m/0dl567"},
+    {"name": "Ariana Grande", "id": "/m/09gkdy4"},
+    {"name": "Bad Bunny", "id": "/g/11gdq15782"},
     {"name": "Drake", "id": "/m/05mt_q"},
+    {"name": "Fuerza Regida", "id": "/g/11fy19q209"},
+    {"name": "Future", "id": "/m/0hhwdgn"},
+    {"name": "Justin Bieber", "id": "/m/06w2sn5"},
+    {"name": "Kanye West", "id": "/m/02l840"},
+    {"name": "KATSEYE", "id": "/g/11vj6xh7_6"},
+    {"name": "Kendrick Lamar", "id": "/m/0g9x698"},
+    {"name": "Morgan Wallen", "id": "/g/11g7ntnqs5"},
+    {"name": "YoungBoy Never Broke Again", "id": "/g/11g9nh3b7y"},
+    {"name": "Olivia Rodrigo", "id": "/g/11j0_8y5xw"},
+    {"name": "Post Malone", "id": "/g/11bw82cs0m"},
+    {"name": "The Weeknd", "id": "/m/0gjdn4c"},
+    {"name": "Taylor Swift", "id": "/m/0dl567"},
 ]
 
 # Tripwire mode: poll only ONE artist to detect that new data has landed, then
