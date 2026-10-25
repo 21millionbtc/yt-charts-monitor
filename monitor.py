@@ -99,6 +99,10 @@ HISTORY_PATH = os.path.join(STATE_DIR, "history.jsonl")
 # today, so a short window would return nothing at all.
 LOOKBACK_DAYS = 14
 
+# Minimum gap between full (all-artist) passes. Guards the request budget when
+# an artist cannot be baselined because the endpoint is throttling.
+FULL_PASS_MIN_INTERVAL = 15 * 60
+
 DISCORD_GREEN = 0x1DB954   # new day of data
 DISCORD_ORANGE = 0xE67E22  # revision to an already-published day
 
@@ -408,12 +412,33 @@ def poll(webhook, verbose=True):
     # Without this, an artist added to ARTISTS after the tripwire is already
     # running would never enter state - and when the edge finally moved, their
     # first real update would be swallowed as a "baseline" with no alert.
+    # A full pass costs one request PER ARTIST, so baselining must be rate
+    # limited. An artist that keeps failing (the endpoint throttles with HTTP
+    # 429) never enters state, so `missing` never empties - without this guard
+    # every single run would be a full pass, which is exactly the request
+    # volume the tripwire exists to avoid.
     missing = [a["name"] for a in ARTISTS if a["id"] not in state]
-    if baseline is None or missing:
+    last_full = (state.get("_meta") or {}).get("last_full_pass") or 0
+    since_full = time.time() - last_full
+    may_baseline = since_full >= FULL_PASS_MIN_INTERVAL
+
+    if baseline is None or (missing and may_baseline):
         if missing:
             print(f"  new artist(s) not yet baselined: {', '.join(missing)}"
                   f" - running a full pass")
-        return check_once(webhook, verbose)
+        changed = check_once(webhook, verbose)
+        # Record the attempt even when nothing changed, or the interval never
+        # advances and the rate limit above has no effect.
+        state = load_state()
+        state["_meta"] = {**(state.get("_meta") or {}),
+                          "last_full_pass": time.time()}
+        save_state(state)
+        return changed
+
+    if missing:
+        mins = int((FULL_PASS_MIN_INTERVAL - since_full) // 60) + 1
+        print(f"  {len(missing)} artist(s) still unbaselined; "
+              f"next full pass in ~{mins}m")
 
     try:
         rows = fetch_artist(canary["id"])

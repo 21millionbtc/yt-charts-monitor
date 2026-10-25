@@ -35,6 +35,10 @@ const ARTISTS = [
 const ENDPOINT = "https://charts.youtube.com/youtubei/v1/browse?alt=json";
 const BROWSE_ID = "FEmusic_analytics_insights_artist";
 const FLAGS = "MusicCharts__enable_apac_and_shorts_charts_expansion";
+
+// Minimum gap between full (all-artist) passes. Guards the request budget when
+// an artist cannot be baselined because the endpoint is throttling.
+const FULL_PASS_MIN_INTERVAL_MS = 15 * 60 * 1000;
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
@@ -300,11 +304,29 @@ async function poll(env) {
   const baseline =
     state[canary.id]?.max_alerted_date || state[canary.id]?.latest_date || null;
 
-  if (!tripwire || !baseline || missing.length) {
+  // A full pass costs one request PER ARTIST. Baselining must therefore be rate
+  // limited, because an artist that keeps failing (the endpoint throttles with
+  // HTTP 429) never enters state - so `missing` never empties and every single
+  // cron tick would run a full pass. At a 1-minute cron and 16 artists that is
+  // ~23,000 requests/day, which is exactly what the tripwire exists to avoid,
+  // and it would also blow the free tier's 1,000 KV writes/day.
+  const lastFullPass = state._meta?.last_full_pass || 0;
+  const sinceFullPass = Date.now() - lastFullPass;
+  const mayBaseline = sinceFullPass >= FULL_PASS_MIN_INTERVAL_MS;
+
+  if (!tripwire || !baseline || (missing.length && mayBaseline)) {
     if (missing.length) log.push(`baselining new artist(s): ${missing.join(", ")}`);
     const dirty = await checkAll(env, state, log);
-    if (dirty) await saveState(env, state);
+    // Record the attempt even when nothing changed, otherwise the interval
+    // never advances and the rate limit above has no effect.
+    state._meta = { ...(state._meta || {}), last_full_pass: Date.now() };
+    await saveState(env, state);
     return log;
+  }
+
+  if (missing.length) {
+    const mins = Math.ceil((FULL_PASS_MIN_INTERVAL_MS - sinceFullPass) / 60000);
+    log.push(`${missing.length} artist(s) still unbaselined; next full pass in ~${mins}m`);
   }
 
   let byDate;
@@ -345,7 +367,9 @@ export default {
     const state = await loadState(env);
     const history = (await env.STATE.get("history", { type: "json" })) || [];
     const body = {
-      artists: Object.values(state).map((a) => ({
+      artists: Object.entries(state)
+        .filter(([k]) => k !== "_meta")
+        .map(([, a]) => ({
         name: a.name,
         latest_date: a.latest_date,
       })),

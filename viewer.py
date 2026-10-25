@@ -159,6 +159,12 @@ def due_artists(entries, now=None, fallback=None):
         name = a["name"]
         if now - (entries.get(name, {}).get("ts") or 0) < CACHE_TTL:
             continue                      # already banked locally
+        mine = (entries.get(name) or {}).get("views")
+        if mine and newest and max(mine) >= newest:
+            # Cache is stale by the clock but already sits at the newest day
+            # anyone has, so no newer data can exist to fetch. Re-asking would
+            # spend one of the few requests that get through on nothing.
+            continue
         covered = fallback.get(name)
         if cutoff and covered and max(covered) >= cutoff:
             continue                      # another IP already got this one
@@ -174,6 +180,7 @@ def filler_loop():
     Spacing backs off while the endpoint is throttling and recovers on success.
     """
     spacing = FETCH_SPACING
+    streak = 0
     while True:
         entries = load_entries()
         due = due_artists(entries)
@@ -196,7 +203,12 @@ def filler_loop():
                     "fetched_at": _now_str(), "ts": time.time(),
                 }
                 save_entries(entries)
-                spacing = max(FETCH_SPACING, spacing * 0.7)   # recover on success
+                # Recover fast. If the throttle is a quota that has just reset,
+                # a slow geometric climb-down would waste the whole window, so
+                # two clean successes in a row snap straight back to base.
+                streak += 1
+                spacing = (FETCH_SPACING if streak >= 2
+                           else max(FETCH_SPACING, spacing * 0.5))
                 with _lock:
                     _status["errors"] = [e for e in _status["errors"]
                                          if not e.startswith(name + ":")]
@@ -204,6 +216,7 @@ def filler_loop():
             except RuntimeError as exc:
                 msg = str(exc)
                 throttled = "429" in msg
+                streak = 0
                 if throttled:
                     # Back off hard: retrying faster is what keeps a throttle on.
                     spacing = min(MAX_SPACING, max(spacing, FETCH_SPACING) * 2)
