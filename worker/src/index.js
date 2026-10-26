@@ -39,6 +39,11 @@ const FLAGS = "MusicCharts__enable_apac_and_shorts_charts_expansion";
 // Minimum gap between full (all-artist) passes. Guards the request budget when
 // an artist cannot be baselined because the endpoint is throttling.
 const FULL_PASS_MIN_INTERVAL_MS = 15 * 60 * 1000;
+// A full pass that fetches NOTHING (every artist throttled) still costs one
+// request per artist while teaching us nothing, so the gap doubles after each
+// such pass, up to this ceiling, and resets the moment one succeeds.
+const FULL_PASS_MAX_INTERVAL_MS = 4 * 60 * 60 * 1000;
+const FULL_PASS_MAX_BACKOFF_STEPS = 4;
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
@@ -202,11 +207,13 @@ async function checkAll(env, state, log) {
   const embeds = [];
   const history = [];
   let dirty = false;
+  let ok = 0;                  // artists actually fetched this pass
 
   for (const artist of ARTISTS) {
     let byDate;
     try {
       byDate = await fetchArtist(artist.id);
+      ok++;
     } catch (err) {
       log.push(`! ${artist.name}: ${err.message}`);
       continue;
@@ -286,7 +293,7 @@ async function checkAll(env, state, log) {
     log.push(`Discord: ${ok ? "sent" : "FAILED"}`);
   }
   await appendHistory(env, history);
-  return dirty;
+  return { dirty, ok };
 }
 
 /**
@@ -311,21 +318,32 @@ async function poll(env) {
   // ~23,000 requests/day, which is exactly what the tripwire exists to avoid,
   // and it would also blow the free tier's 1,000 KV writes/day.
   const lastFullPass = state._meta?.last_full_pass || 0;
+  const backoffSteps = state._meta?.full_pass_backoff || 0;
+  const fullPassInterval = Math.min(
+    FULL_PASS_MIN_INTERVAL_MS * 2 ** backoffSteps,
+    FULL_PASS_MAX_INTERVAL_MS
+  );
   const sinceFullPass = Date.now() - lastFullPass;
-  const mayBaseline = sinceFullPass >= FULL_PASS_MIN_INTERVAL_MS;
+  const mayBaseline = sinceFullPass >= fullPassInterval;
 
   if (!tripwire || !baseline || (missing.length && mayBaseline)) {
     if (missing.length) log.push(`baselining new artist(s): ${missing.join(", ")}`);
-    const dirty = await checkAll(env, state, log);
+    const { dirty, ok } = await checkAll(env, state, log);
+    if (ok === 0) log.push(`full pass fetched nothing; backing off`);
     // Record the attempt even when nothing changed, otherwise the interval
     // never advances and the rate limit above has no effect.
-    state._meta = { ...(state._meta || {}), last_full_pass: Date.now() };
+    state._meta = {
+      ...(state._meta || {}),
+      last_full_pass: Date.now(),
+      full_pass_backoff:
+        ok > 0 ? 0 : Math.min(backoffSteps + 1, FULL_PASS_MAX_BACKOFF_STEPS),
+    };
     await saveState(env, state);
     return log;
   }
 
   if (missing.length) {
-    const mins = Math.ceil((FULL_PASS_MIN_INTERVAL_MS - sinceFullPass) / 60000);
+    const mins = Math.ceil((fullPassInterval - sinceFullPass) / 60000);
     log.push(`${missing.length} artist(s) still unbaselined; next full pass in ~${mins}m`);
   }
 
@@ -340,7 +358,7 @@ async function poll(env) {
   const latest = Object.keys(byDate).sort().at(-1);
   if (latest > baseline) {
     log.push(`tripwire TRIPPED: ${baseline} -> ${latest}`);
-    const dirty = await checkAll(env, state, log);
+    const { dirty } = await checkAll(env, state, log);
     if (dirty) await saveState(env, state);
   } else {
     log.push(`tripwire (${canary.name}): ${latest}, no change`);
