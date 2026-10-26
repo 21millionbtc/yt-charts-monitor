@@ -8,19 +8,20 @@ compatibility_date = "2026-09-01"
 # if you set this to true after registering a workers.dev subdomain.
 workers_dev = false
 
-# Every 5 minutes.
+# Every 5 minutes, but only during 22:00-09:59 UTC.
 #
-# This was every minute (Cloudflare's cron floor). Lowered 2026-10-26 while the
-# artist-insights endpoint was returning HTTP 429 to every request: at one
-# request per minute the tripwire was being refused outright, so the faster
-# cadence bought nothing and only added pressure. Five minutes is a 5x
-# reduction and costs only detection latency on an event that happens once a
-# day - the same trade the tripwire itself is built on.
+# The artist-insights endpoint refuses requests with HTTP 429 for most of the
+# day. Measured 2026-10-25/26, every successful fetch - from three independent
+# networks (home IP, Cloudflare, GitHub runners) - fell in 22:00-09:00 UTC, and
+# every daytime attempt failed. Polling outside that window achieved nothing
+# and added the sustained load that keeps the limit in place.
 #
-# Raise it back to "* * * * *" once the endpoint is reliably answering again,
-# if faster new-day detection is worth it.
+# This is also when new data lands: 36 historical detections cluster in
+# 04:00-13:00 UTC (median lag 57.7h from the data date).
+#
+# Restore "*/5 * * * *" if the endpoint starts answering during the day again.
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["*/5 0-9,22-23 * * *"]
 
 [vars]
 TRIPWIRE = "1"             # poll one artist to detect changes, then fetch all
