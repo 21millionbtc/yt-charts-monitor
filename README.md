@@ -13,19 +13,40 @@ There is no published rate limit for this endpoint, so the goal is to stay
 obviously modest rather than to find the ceiling.
 
 All artists are published by the same pipeline on the same schedule — verified
-2026-09-02, when all three shared a trailing edge of 2026-08-30. So there is no
-need to poll all of them. **Tripwire mode polls one artist** to detect that new
-data landed, and only then fetches everyone and alerts. That divides the
-steady-state request rate by the number of artists:
+2026-09-02, when all three then-tracked artists shared a trailing edge of
+2026-08-30. So there is no need to poll all of them. **Tripwire mode polls one
+artist** to detect that new data landed, and only then fetches everyone and
+alerts. With 16 artists that divides the steady-state rate by 16:
 
-| Interval | Naive (3 artists) | With tripwire |
+| Interval | Naive (16 artists) | With tripwire |
 |---|---|---|
-| 5 min | 864/day | 288/day |
-| 2 min | 2,160/day | 720/day |
-| 60s | 4,320/day | 1,440/day |
+| 5 min | 4,608/day | 288/day |
+| 1 min | 23,040/day | 1,440/day |
 
-At the configured 2-minute interval that is **720 requests/day** — about the same
-volume as polling all three artists every 15 minutes.
+At the configured 5-minute interval that is **~288 requests/day**, plus one
+16-request burst on the day's single trip.
+
+### The full-pass trap
+
+A full pass costs one request *per artist*, so anything that can trigger one
+every cycle destroys the budget above. Both runners used to request a full pass
+whenever an artist was missing from state, assuming a missing artist gets
+baselined on the next pass.
+
+**That assumption fails under throttling.** An artist that keeps returning HTTP
+429 never enters state, so `missing` never empties and *every* tick runs a full
+pass. On 2026-10-25, expanding from 3 to 16 artists on the Worker's 1-minute
+cron did exactly this: ~23,000 requests/day, the top-right cell of that table.
+The 3-artist roster had masked it, because all three baselined on the first try.
+
+Baselining is therefore rate limited by `FULL_PASS_MIN_INTERVAL` (15 minutes),
+recorded in state under `_meta.last_full_pass`. The timestamp is written even
+when nothing changed — otherwise the interval never advances and the guard does
+nothing.
+
+The lesson generalises: **any retry whose trigger condition is "data is
+missing" will spin forever when the thing that fills it is failing.** Rate limit
+the retry, not just the request.
 
 Tripwire is on by default; set `TRIPWIRE=0` to poll every artist every cycle. The
 only cost is that revisions to the non-tripwire artists are noticed just on
@@ -217,7 +238,7 @@ crons on free public repos. No configuration fixes this.
 
 The Worker in `worker/` runs the same logic on Cloudflare Cron Triggers, which do
 fire on time. Free plan, no credit card, 1-minute minimum interval (configured
-here at 2).
+here at 5 — see the note in `worker/wrangler.toml` about why it was lowered).
 
 ### Deploy
 
