@@ -244,15 +244,20 @@ def build():
         if entries.get(name, {}).get("views"):
             artists[name] = entries[name]["views"]
             cached.append(name)
+        elif state.get(name):
+            artists[name] = state[name]
+            from_st.append(name)
         else:
-            if state.get(name):
-                artists[name] = state[name]
-                from_st.append(name)
+            # "pending" means NO source has this artist yet, so it renders as a
+            # placeholder. An artist served from KV or state.json has data and
+            # must not also be counted here - doing so inflated both the
+            # "still fetching" count and the progress bar, making the banner
+            # contradict the panels actually on screen.
             pending.append(name)
 
     bits = []
     if cached:
-        bits.append(f"{len(cached)}/{len(ARTISTS)} live")
+        bits.append(f"{len(cached)} live")
     if from_st:
         label = "KV + state" if os.path.exists(KV_PATH) else "state.json"
         bits.append(f"{len(from_st)} from {label}")
@@ -345,7 +350,13 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    threading.Thread(target=filler_loop, daemon=True).start()
+    # FILL=0 serves cached/KV/state data without making ANY upstream request.
+    # Useful when deliberately backing off: the endpoint throttles on sustained
+    # volume, so a genuine quiet period is itself a remedy.
+    if os.environ.get("FILL", "1").strip() not in ("0", "false", "no"):
+        threading.Thread(target=filler_loop, daemon=True).start()
+    else:
+        print("  FILL=0 - background fetching disabled (serving stored data only)")
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     print(f"\n  Artist daily views - last {DAYS} days, {len(ARTISTS)} artists")
     print(f"  http://localhost:{PORT}")
