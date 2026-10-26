@@ -218,6 +218,10 @@ def append_history(record):
 # --------------------------------------------------------------------------
 
 def post_discord(webhook, embeds):
+    """Post embeds, splitting into messages of 10 - Discord's hard limit."""
+    if webhook and len(embeds) > 10:
+        return all(post_discord(webhook, embeds[i:i + 10])
+                   for i in range(0, len(embeds), 10))
     if not webhook:
         print("  ! DISCORD_WEBHOOK_URL not set - skipping notification")
         return False
@@ -243,6 +247,32 @@ def post_discord(webhook, embeds):
 
 def fmt(n):
     return f"{int(n):,}"
+
+
+def build_summary_embed(events, detected_at):
+    """One embed covering every artist that gained a new day.
+
+    Discord allows at most 10 embeds per webhook message. Every artist is
+    published by the same pipeline on the same day, so one embed per artist
+    would blow that limit on exactly the days this monitor exists to report -
+    a 16-artist roster would silently fail to notify at all.
+    """
+    date = max(e["date"] for e in events)
+    lines = []
+    for e in sorted(events, key=lambda e: -int(e["views"])):
+        delta = ""
+        prev = e.get("prev")
+        if prev not in (None, ""):
+            d = int(e["views"]) - int(prev)
+            pct = (d / int(prev) * 100) if int(prev) else 0.0
+            delta = f"  ({'+' if d >= 0 else '-'}{abs(pct):.1f}%)"
+        lines.append(f"`{fmt(e['views']):>12}`  {e['name']}{delta}")
+    return {
+        "title": f"New day of data - {date}",
+        "description": "\n".join(lines)[:4000],
+        "color": DISCORD_GREEN,
+        "footer": {"text": f"{len(events)} artist(s) - detected {detected_at} UTC"},
+    }
 
 
 def build_embed(artist, kind, latest, views, previous_views, detected_at):
@@ -286,6 +316,7 @@ def check_once(webhook, verbose=True):
     state = load_state()
     detected_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     embeds = []
+    new_days = []          # collected, then reported as ONE summary embed
     changed = False
 
     for artist in ARTISTS:
@@ -324,8 +355,8 @@ def check_once(webhook, verbose=True):
             # monitor exists for, and delaying it would defeat the 30s sprint.
             changed = True
             yesterday = prev_by_date.get(prev_latest)
-            embeds.append(build_embed(name, "new_day", latest,
-                                      by_date[latest], yesterday, detected_at))
+            new_days.append({"name": name, "date": latest,
+                             "views": by_date[latest], "prev": yesterday})
             append_history({"ts": detected_at, "artist": name, "kind": "new_day",
                             "date": latest, "views": by_date[latest],
                             "previous_date": prev_latest})
@@ -387,6 +418,9 @@ def check_once(webhook, verbose=True):
                       "last_checked": detected_at}
 
     save_state(state)
+
+    if new_days:
+        embeds.insert(0, build_summary_embed(new_days, detected_at))
 
     if embeds:
         ok = post_discord(webhook, embeds)

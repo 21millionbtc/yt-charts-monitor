@@ -162,6 +162,35 @@ function fmt(n) {
   return Number(n).toLocaleString("en-US");
 }
 
+/**
+ * One embed covering every artist that gained a new day.
+ *
+ * Discord allows at most 10 embeds per webhook message. All artists publish on
+ * the same day, so one embed each would blow that limit on exactly the days
+ * this monitor exists to report - a 16-artist roster would notify nothing.
+ */
+function buildSummaryEmbed(events, detectedAt) {
+  const date = events.map((e) => e.date).sort().at(-1);
+  const lines = events
+    .slice()
+    .sort((a, b) => Number(b.views) - Number(a.views))
+    .map((e) => {
+      let delta = "";
+      if (e.prev != null && e.prev !== "") {
+        const d = Number(e.views) - Number(e.prev);
+        const pct = Number(e.prev) ? (d / Number(e.prev)) * 100 : 0;
+        delta = `  (${d >= 0 ? "+" : "-"}${Math.abs(pct).toFixed(1)}%)`;
+      }
+      return `\`${fmt(e.views).padStart(12)}\`  ${e.name}${delta}`;
+    });
+  return {
+    title: `New day of data - ${date}`,
+    description: lines.join("\n").slice(0, 4000),
+    color: GREEN,
+    footer: { text: `${events.length} artist(s) - detected ${detectedAt} UTC` },
+  };
+}
+
 function buildEmbed(artist, kind, date, views, prevViews, detectedAt) {
   const fields = [
     { name: "Date", value: date, inline: true },
@@ -189,6 +218,13 @@ function buildEmbed(artist, kind, date, views, prevViews, detectedAt) {
 
 async function postDiscord(webhook, embeds) {
   if (!webhook || !embeds.length) return false;
+  if (embeds.length > 10) {
+    let all = true;
+    for (let i = 0; i < embeds.length; i += 10) {
+      all = (await postDiscord(webhook, embeds.slice(i, i + 10))) && all;
+    }
+    return all;
+  }
   const resp = await fetch(webhook, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -205,6 +241,7 @@ async function checkAll(env, state, log) {
   const alertRevisions = String(env.ALERT_ON_REVISIONS || "") === "1";
   const detectedAt = new Date().toISOString().replace("T", " ").slice(0, 19);
   const embeds = [];
+  const newDays = [];   // reported as ONE summary embed
   const history = [];
   let dirty = false;
   let ok = 0;                  // artists actually fetched this pass
@@ -239,10 +276,10 @@ async function checkAll(env, state, log) {
       dirty = true;
     } else if (latest > maxAlerted) {
       log.push(`${artist.name}: NEW DAY ${prev.latest_date} -> ${latest}`);
-      embeds.push(
-        buildEmbed(artist.name, "new_day", latest, byDate[latest],
-                   prevViews[prev.latest_date], detectedAt)
-      );
+      newDays.push({
+        name: artist.name, date: latest, views: byDate[latest],
+        prev: prevViews[prev.latest_date],
+      });
       history.push({ ts: detectedAt, artist: artist.name, kind: "new_day", date: latest });
       maxAlerted = latest;
       dirty = true;
@@ -287,6 +324,8 @@ async function checkAll(env, state, log) {
       max_alerted_date: maxAlerted,
     };
   }
+
+  if (newDays.length) embeds.unshift(buildSummaryEmbed(newDays, detectedAt));
 
   if (embeds.length) {
     const ok = await postDiscord(env.DISCORD_WEBHOOK_URL, embeds);
