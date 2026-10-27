@@ -413,6 +413,24 @@ async function poll(env) {
 
 export default {
   async scheduled(event, env, ctx) {
+    // TEST_DISCORD=1 posts one sample alert through the real webhook and skips
+    // the poll, so the notification path can be verified without waiting for a
+    // genuine new day. Set it back to "0" immediately afterwards.
+    if (String(env.TEST_DISCORD || "") === "1") {
+      ctx.waitUntil(
+        postDiscord(env.DISCORD_WEBHOOK_URL, [
+          {
+            title: "Test alert - notification path check",
+            description:
+              "If you can read this, the Worker can reach Discord.\n" +
+              "This is a test, not a new day of data.",
+            color: GREEN,
+            footer: { text: `sent ${new Date().toISOString().slice(0, 19)} UTC` },
+          },
+        ]).then((ok) => console.log(`TEST_DISCORD: ${ok ? "sent" : "FAILED"}`))
+      );
+      return;
+    }
     ctx.waitUntil(
       poll(env).then((log) => console.log(log.join(" | ")))
     );

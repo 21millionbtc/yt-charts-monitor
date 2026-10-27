@@ -26,6 +26,7 @@ crons = ["*/5 0-9,22-23 * * *"]
 [vars]
 TRIPWIRE = "1"             # poll one artist to detect changes, then fetch all
 ALERT_ON_REVISIONS = "0"   # revisions are logged but do not ping Discord
+TEST_DISCORD = "0"            # set to "1" to send one test alert
 
 # Created by:  npx wrangler kv namespace create STATE
 # Paste the returned id below - it is an identifier, not a secret.
